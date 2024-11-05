@@ -1,12 +1,20 @@
 package io.ryanproback.springboot3subdomaincookie;
 
+import org.apache.tomcat.util.http.LegacyCookieProcessor;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.http.RequestEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.Objects;
 
@@ -25,50 +33,37 @@ class SpringBoot3SubdomainCookieApplicationTests {
     void contextLoads() {
     }
 
-    private RestClient getRestClient() {
-        return RestClient.builder()
-                .baseUrl(serverHost + ":" + port)
-                .build();
+    private RestTemplate getRestClient() {
+        RestTemplateBuilder builder = new RestTemplateBuilder();
+        return builder.rootUri(serverHost + ":" + port).build();
     }
+
 
     @Test
     void testSetCookieUsingByResponseCookie() {
-        var response = getRestClient().get()
-                        .uri("/set-cookie/response-cookie")
-                        .retrieve()
-                        .toEntity(String.class);
-
-
+        var response = getRestClient().getForEntity("/set-cookie/response-cookie", String.class);
         testCookieSet(response, CookieController.COOKIE_DOMAIN);
     }
 
     @Test
     void testSetCookieUsingByHttpServletResponse() {
-        var response = getRestClient().get()
-                        .uri("/set-cookie/http-servlet-response")
-                        .retrieve()
-                        .toEntity(String.class);
+        var response = getRestClient().getForEntity("/set-cookie/http-servlet-response", String.class);
 
         testCookieSet(response, CookieController.COOKIE_DOMAIN);
     }
 
     @Test
     void testSetCookieDotUsingByResponseCookie() {
-        var response = getRestClient().get()
-                        .uri("/set-cookie/response-cookie/dot")
-                        .retrieve()
-                        .toEntity(String.class);
+        var response = getRestClient().getForEntity("/set-cookie/response-cookie/dot", String.class);
 
         testCookieSet(response, CookieController.COOKIE_DOT_DOMAIN);
     }
 
+    @Disabled
     @Test
     void testSetCookieDotUsingByHttpServletResponse() {
         try {
-            getRestClient().get()
-                    .uri("/set-cookie/http-servlet-response/dot")
-                    .retrieve()
-                    .toEntity(String.class);
+            getRestClient().getForEntity("/set-cookie/http-servlet-response/dot", String.class);
 
         } catch (HttpServerErrorException.InternalServerError ex) {
             // java.lang.IllegalArgumentException: An invalid domain [.kr-local-jainwon.com] was specified for this cookie
@@ -80,24 +75,27 @@ class SpringBoot3SubdomainCookieApplicationTests {
     }
 
     @Test
-    void testGetCookie() {
-        var response = getRestClient().get()
-                        .uri("/get-cookie")
-                        .header("Cookie", COOKIE_NAME + "=cookie-value")
-                        .retrieve()
-                        .toEntity(String.class);
+    void testSetCookieDotUsingByHttpServletResponse27Legacy() {
+        var response = getRestClient().getForEntity("/set-cookie/http-servlet-response/dot", String.class);
+        testCookieSet(response, CookieController.COOKIE_DOT_DOMAIN);
+    }
 
+    @Test
+    void testGetCookie() {
+        var request = RequestEntity.get("/get-cookie")
+                .header("Cookie", COOKIE_NAME + "=test-cookie")
+                .build();
+        var response = getRestClient().exchange(request, String.class);
         Assertions.assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
     }
 
     // 쿠키가 요청에 포함만 되면 읽을 수 있는거임. 따라서 전달하고 말고는 브라우저에 의존함.
     @Test
     void testGetCookieDot() {
-        var response = getRestClient().get()
-                        .uri("/get-cookie/dot")
-                        .header("Cookie", COOKIE_DOT_NAME + "=cookie-value")
-                        .retrieve()
-                        .toEntity(String.class);
+        var request = RequestEntity.get("/get-cookie/dot")
+                .header("Cookie", COOKIE_DOT_NAME + "=test-cookie-dot")
+                .build();
+        var response = getRestClient().exchange(request, String.class);
 
         Assertions.assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
     }
@@ -114,4 +112,16 @@ class SpringBoot3SubdomainCookieApplicationTests {
     // 서브도메인 쿠키의 세팅과 요청에 포함해서 보내는 것은
     // 전적으로 브라우저 구현에 의존한다.
     // 크롬 기준으로 쿠키 도메인 앞에 .(닷)이 들어가지 않아도 잘 동작하게 되어 있음.
+
+
+    // 2.7 에서 사용하는 톰캣까지는 LegacyCookieProcessor 를 지원하기 때문에
+    // 앞에 .(닷)을 붙인 쿠키도 문제가 없다.
+    @TestConfiguration
+    static class LegacyCookieProcessorConfiguration {
+        @Bean
+        WebServerFactoryCustomizer<TomcatServletWebServerFactory> cookieProcessorCustomizer() {
+            return tomcatServletWebServerFactory -> tomcatServletWebServerFactory.addContextCustomizers(context -> context.setCookieProcessor(
+                    new LegacyCookieProcessor()));
+        }
+    }
 }
